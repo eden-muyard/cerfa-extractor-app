@@ -1,0 +1,130 @@
+{
+  "fields": [
+    {
+      "key": "annee_valorisation",
+      "label": "Annee Valorisation",
+      "patterns": ["annee\\s+valorisation", "\\b20\\d{2}\\b"],
+      "value_type": "year",
+      "source_tabs": ["parametres_chiffrage", "synthese", "2069_a"]
+    },
+    {
+      "key": "nom",
+      "label": "NOM",
+      "patterns": ["\\bnom\\b", "raison\\s+sociale"],
+      "value_type": "text",
+      "source_tabs": ["2069_a"]
+    },
+    {
+      "key": "siren",
+      "label": "SIREN",
+      "patterns": ["\\bsiren\\b"],
+      "value_type": "siren",
+      "source_tabs": ["2069_a"]
+    },
+    {
+      "key": "nace",
+      "label": "NACE",
+      "patterns": ["\\bnace\\b", "naf"],
+      "value_type": "text",
+      "source_tabs": ["2069_a"]
+    },
+    {
+      "key": "pme",
+      "label": "PME",
+      "patterns": ["\\bpme\\b", "petite.*moyenne"],
+      "value_type": "yes_no",
+      "source_tabs": ["2069_a"]
+    },
+    {
+      "key": "jeune_docteur",
+      "label": "Jeune Docteur / Nombre de JD",
+      "patterns": ["jeune\\s+docteur", "nombre\\s+de\\s+jd", "\\bjd\\b"],
+      "value_type": "number",
+      "source_tabs": ["2069_a"]
+    },
+    {
+      "key": "nombre_salaries_valorises",
+      "label": "Nombre de salaries valorises",
+      "patterns": ["nombre\\s+de\\s+salaries?\\s+valoris", "salaries?\\s+valoris"],
+      "value_type": "number",
+      "source_tabs": ["2069_a"]
+    },
+    {
+      "key": "pole",
+      "label": "POLE",
+      "patterns": ["\\bpole\\b", "p[ôo]le"],
+      "value_type": "pole",
+      "source_tabs": ["parametres_chiffrage"]
+    },
+    {
+      "key": "honoraires",
+      "label": "Hono (annee)",
+      "patterns": ["hono", "honoraires?\\s*(20\\d{2})?"],
+      "value_type": "number",
+      "source_tabs": ["parametres_chiffrage"]
+    },
+    {
+      "key": "credit_parametres",
+      "label": "Credit",
+      "patterns": ["\\bcredit\\b", "credits?"],
+      "value_type": "credit_choice",
+      "source_tabs": ["parametres_chiffrage"]
+    },
+    {
+      "key": "montant_credit_impot_cir",
+      "label": "Montant du credit d'impot CIR",
+      "patterns": ["montant.*credit\\s+d'?impot.*\\bcir\\b", "credit\\s+d'?impot.*recherche"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    },
+    {
+      "key": "montant_credit_impot_cii",
+      "label": "Montant du credit d'impot CII",
+      "patterns": ["montant.*credit\\s+d'?impot.*\\bcii\\b", "credit\\s+d'?impot.*innovation"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    },
+    {
+      "key": "dotations_amortissements",
+      "label": "Dotations aux amortissements",
+      "patterns": ["dotations?\\s+aux?\\s+amort"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    },
+    {
+      "key": "depenses_personnel",
+      "label": "Depenses de personnel",
+      "patterns": ["depenses?\\s+de\\s+personnel(?!.*jeunes?\\s+docteurs?)"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    },
+    {
+      "key": "depenses_veille",
+      "label": "Depenses de veille",
+      "patterns": ["depenses?\\s+de\\s+veille"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    },
+    {
+      "key": "depenses_brevets",
+      "label": "Depenses de brevets",
+      "patterns": ["depenses?.*brevets?"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    },
+    {
+      "key": "depenses_prestataires_externes",
+      "label": "Depenses de prestataires externes",
+      "patterns": ["depenses?.*prestataires?.*extern", "sous[\\s-]?traitance"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    },
+    {
+      "key": "subventions_avances_remboursables",
+      "label": "Subventions et avances remboursables",
+      "patterns": ["subventions?\\s+et\\s+avances?\\s+remboursables?", "subventions?"],
+      "value_type": "number",
+      "source_tabs": ["synthese"]
+    }
+  ]
+}

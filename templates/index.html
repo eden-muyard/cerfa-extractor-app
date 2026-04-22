@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CERFA 2069-A-SD Extractor</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; }
+    .container { max-width: 760px; background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 20px rgba(0, 0, 0, .08); }
+    h1 { margin-top: 0; }
+    .hint { color: #555; margin-top: 0; }
+    form { margin: 1rem 0 1.5rem; display: flex; gap: .8rem; align-items: center; }
+    input[type=file] { flex: 1; }
+    button { border: 0; padding: .6rem 1rem; background: #2457ff; color: white; border-radius: 6px; cursor: pointer; }
+    .error { background: #ffe5e5; color: #842029; padding: .8rem; border-radius: 6px; }
+    .message { background: #e5ffec; color: #0f5132; padding: .8rem; border-radius: 6px; margin-bottom: .8rem; }
+    .result { background: #e8f4ff; padding: 1rem; border-radius: 6px; }
+    .config { background: #fff7e8; padding: 1rem; border-radius: 6px; margin-bottom: 1.2rem; }
+    .result-grid { display: grid; grid-template-columns: 180px 1fr; row-gap: .5rem; column-gap: .8rem; }
+    .config-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: .6rem; align-items: end; margin-top: .7rem; }
+    .config-grid input, .config-grid select { padding: .45rem; border: 1px solid #ccc; border-radius: 6px; }
+    .label { font-weight: bold; }
+    .pill { display: inline-block; background: #eef2ff; color: #243c9b; border-radius: 999px; padding: .2rem .6rem; margin: .2rem .2rem 0 0; font-size: .85rem; }
+    .pill.required { background: #d9ecff; color: #0b4a99; }
+    code { background: #f0f0f0; padding: .1rem .3rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CERFA 2069-A-SD Extractor</h1>
+    <p class="hint">Upload a CERFA Excel file. The app extracts key values and saves each row in the shared database.</p>
+    <p class="hint"><a href="/export/extractions.xlsx">Download latest extractions as Excel</a></p>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+    {% if message %}
+      <div class="message">{{ message }}</div>
+    {% endif %}
+
+    <div class="config">
+      <h3 style="margin:0;">Add a new label</h3>
+      <p class="hint">Just fill the name and click the button. Example: <code>Honoraires 2026</code>. The required labels are locked and always kept.</p>
+      <form method="post" action="/labels/add" class="config-grid">
+        <div>
+          <div class="label">Label name</div>
+          <input type="text" name="label" placeholder="Ex: Pole client" required>
+        </div>
+        <div>
+          <div class="label">Keywords (optional)</div>
+          <input type="text" name="patterns" placeholder="Ex: pole, p[ôo]le">
+        </div>
+        <div>
+          <div class="label">Value type</div>
+          <select name="value_type">
+            <option value="text">Text</option>
+            <option value="number">Number</option>
+            <option value="siren">SIREN</option>
+            <option value="yes_no">Yes/No</option>
+            <option value="pole">Pole (energie/biotech/industrie/innovation/digitale)</option>
+          </select>
+        </div>
+        <div>
+          <button type="submit">+ Add label</button>
+        </div>
+      </form>
+      <div style="margin-top:.6rem;">
+        {% for field in fields %}
+          <span class="pill {% if field.key in required_keys %}required{% endif %}">{{ field.label }}</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <form method="post" action="/upload" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".xlsx,.xlsm,.xltx,.xltm" required>
+      <button type="submit">Extract</button>
+    </form>
+
+    {% if result %}
+      <div class="result">
+        <h3>Last extraction</h3>
+        <div class="result-grid">
+          {% for field in fields %}
+            <div class="label">{{ field.label }}</div><div>{{ result[field.key] or "-" }}</div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</body>
+</html>
