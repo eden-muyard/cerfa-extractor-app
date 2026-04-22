@@ -2,7 +2,7 @@ from pathlib import Path
 from io import BytesIO
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
 
@@ -105,6 +105,11 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> HTMLRes
             "required_keys": required_keys,
         },
     )
+
+
+@app.get("/upload")
+def upload_get_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/", status_code=307)
 
 
 @app.post("/labels/add", response_class=HTMLResponse)
