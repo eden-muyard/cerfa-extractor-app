@@ -43,7 +43,10 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 def is_authenticated(request: Request) -> bool:
     if not AUTH_ENABLED:
         return True
-    return request.session.get("authenticated") is True
+    session = request.scope.get("session")
+    if not isinstance(session, dict):
+        return False
+    return session.get("authenticated") is True
 
 
 def cleanup_old_uploads() -> None:
@@ -191,7 +194,15 @@ async def login_submit(
     if not AUTH_ENABLED:
         return RedirectResponse(url="/", status_code=307)
     if username == APP_USERNAME and password == APP_PASSWORD:
-        request.session["authenticated"] = True
+        session = request.scope.get("session")
+        if not isinstance(session, dict):
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                {"request": request, "error": "Session is unavailable. Please redeploy."},
+                status_code=500,
+            )
+        session["authenticated"] = True
         return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse(
         request,
@@ -203,7 +214,9 @@ async def login_submit(
 
 @app.post("/logout")
 def logout(request: Request) -> RedirectResponse:
-    request.session.clear()
+    session = request.scope.get("session")
+    if isinstance(session, dict):
+        session.clear()
     target = "/login" if AUTH_ENABLED else "/"
     return RedirectResponse(url=target, status_code=303)
 
