@@ -436,19 +436,107 @@ def count_project_columns_from_rep_cout(sheet) -> dict[str, str]:
 
 
 def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None) -> str:
+    def get_year_from_text(value: Any) -> int | None:
+        text = normalize_text(value)
+        if not text:
+            return None
+        match = YEAR_REGEX.search(text)
+        if not match:
+            return None
+        year = int(match.group(1))
+        if 1990 <= year <= 2100:
+            return year
+        return None
+
+    def get_hono_value_from_cell(value: Any) -> str:
+        extracted = extract_number(value)
+        return extracted or ""
+
+    def contains_hono_keyword(value: Any) -> bool:
+        text = normalize_text(value)
+        return "hono" in text or "honoraire" in text
+
+    def extract_from_horizontal_headers(rows: list[tuple[Any, ...]], target: int) -> str:
+        for header_row_idx, header_row in enumerate(rows):
+            year_columns: dict[int, int] = {}
+            for col_idx, cell in enumerate(header_row):
+                year = get_year_from_text(cell)
+                if year:
+                    year_columns[col_idx] = year
+            if target not in year_columns.values():
+                continue
+            target_cols = [col for col, year in year_columns.items() if year == target]
+            for row_idx in range(max(0, header_row_idx - 8), min(len(rows), header_row_idx + 9)):
+                row = rows[row_idx]
+                if not any(contains_hono_keyword(cell) for cell in row):
+                    continue
+                for target_col in target_cols:
+                    if target_col >= len(row):
+                        continue
+                    amount = get_hono_value_from_cell(row[target_col])
+                    if amount:
+                        return amount
+        return ""
+
+    def extract_from_vertical_headers(rows: list[tuple[Any, ...]], target: int) -> str:
+        max_cols = max((len(row) for row in rows), default=0)
+        for col_idx in range(max_cols):
+            year_rows: dict[int, int] = {}
+            for row_idx, row in enumerate(rows):
+                if col_idx >= len(row):
+                    continue
+                year = get_year_from_text(row[col_idx])
+                if year:
+                    year_rows[row_idx] = year
+            if target not in year_rows.values():
+                continue
+            target_rows = [row_idx for row_idx, year in year_rows.items() if year == target]
+            for check_col in range(max(0, col_idx - 8), min(max_cols, col_idx + 9)):
+                has_hono_label = False
+                for row_idx, row in enumerate(rows):
+                    if check_col >= len(row):
+                        continue
+                    if contains_hono_keyword(row[check_col]):
+                        has_hono_label = True
+                        break
+                if not has_hono_label:
+                    continue
+                for target_row in target_rows:
+                    if target_row >= len(rows):
+                        continue
+                    row = rows[target_row]
+                    if check_col >= len(row):
+                        continue
+                    amount = get_hono_value_from_cell(row[check_col])
+                    if amount:
+                        return amount
+        return ""
+
     target_year: int | None = None
     if annee_valorisation and annee_valorisation.isdigit():
         target_year = int(annee_valorisation) - 1
     max_row = min(sheet.max_row or 400, 400)
     max_col = min(sheet.max_column or 80, 80)
+    rows = list(
+        sheet.iter_rows(
+            min_row=1,
+            max_row=max_row,
+            min_col=1,
+            max_col=max_col,
+            values_only=True,
+        )
+    )
+
+    if target_year is not None:
+        horizontal_amount = extract_from_horizontal_headers(rows, target_year)
+        if horizontal_amount:
+            return horizontal_amount
+        vertical_amount = extract_from_vertical_headers(rows, target_year)
+        if vertical_amount:
+            return vertical_amount
+
     fallback_value = ""
-    for row in sheet.iter_rows(
-        min_row=1,
-        max_row=max_row,
-        min_col=1,
-        max_col=max_col,
-        values_only=True,
-    ):
+    for row in rows:
         row_text = " ".join(
             normalize_text(value) for value in row if value is not None and str(value).strip()
         )
@@ -460,7 +548,7 @@ def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None
             fallback_value = row_numbers[0]
         if target_year is None:
             continue
-        year_found = any(str(target_year) in normalize_text(value) for value in row if value is not None)
+        year_found = any(get_year_from_text(value) == target_year for value in row if value is not None)
         if year_found and row_numbers:
             return row_numbers[0]
     return fallback_value
