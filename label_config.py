@@ -16,14 +16,24 @@ REQUIRED_FIELDS = [
     {"key": "pole", "label": "POLE", "patterns": [r"\bpole\b", r"p[ôo]le"], "value_type": "pole", "source_tabs": ["parametres_chiffrage"]},
     {"key": "honoraires", "label": "Hono (annee)", "patterns": [r"hono", r"honoraires?\s*(20\d{2})?"], "value_type": "number", "source_tabs": ["parametres_chiffrage"]},
     {"key": "credit_parametres", "label": "Credit", "patterns": [r"\bcredit\b", r"credits?"], "value_type": "credit_choice", "source_tabs": ["parametres_chiffrage"]},
+    {"key": "jei", "label": "JEI", "patterns": [r"\bjei\b", r"jeune\s+entreprise\s+innovante"], "value_type": "yes_no", "source_tabs": ["parametres_chiffrage"]},
+    {"key": "cloture_decalee", "label": "Cloture decalee", "patterns": [r"cloture\s+decal", r"decalage\s+de\s+cloture"], "value_type": "yes_no", "source_tabs": ["parametres_chiffrage"]},
+    {"key": "type_honoraires", "label": "Type d'honoraires", "patterns": [r"type\s+d['’]?\s*honoraires?", r"\bhonoraires?\b"], "value_type": "honoraires_type", "source_tabs": ["parametres_chiffrage"]},
+    {"key": "honoraires_n_1", "label": "Honoraires n-1", "patterns": [r"hono", r"honoraires?"], "value_type": "number", "source_tabs": ["parametres_chiffrage"]},
     {"key": "montant_credit_impot_cir", "label": "Montant du credit d'impot CIR", "patterns": [r"montant.*credit\s+d'?impot.*\bcir\b", r"credit\s+d'?impot.*recherche"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "montant_credit_impot_cii", "label": "Montant du credit d'impot CII", "patterns": [r"montant.*credit\s+d'?impot.*\bcii\b", r"credit\s+d'?impot.*innovation"], "value_type": "number", "source_tabs": ["synthese"]},
+    {"key": "montant_cic", "label": "Montant du CIC", "patterns": [r"montant.*\bcic\b", r"\bcic\b"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "dotations_amortissements", "label": "Dotations aux amortissements", "patterns": [r"dotations?\s+aux?\s+amort"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "depenses_personnel", "label": "Depenses de personnel", "patterns": [r"depenses?\s+de\s+personnel(?!.*jeunes?\s+docteurs?)"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "depenses_veille", "label": "Depenses de veille", "patterns": [r"depenses?\s+de\s+veille"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "depenses_brevets", "label": "Depenses de brevets", "patterns": [r"depenses?.*brevets?"], "value_type": "number", "source_tabs": ["synthese"]},
+    {"key": "depenses_fonctionnement", "label": "Depenses de fonctionnement", "patterns": [r"depenses?\s+de\s+fonctionnement"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "depenses_prestataires_externes", "label": "Depenses de prestataires externes", "patterns": [r"depenses?.*prestataires?.*extern", r"sous[\s-]?traitance"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "subventions_avances_remboursables", "label": "Subventions et avances remboursables", "patterns": [r"subventions?\s+et\s+avances?\s+remboursables?", r"subventions?"], "value_type": "number", "source_tabs": ["synthese"]},
+    {"key": "depenses_internes", "label": "Depenses internes", "patterns": [r"montant total des depenses de recherche realisees"], "value_type": "number", "source_tabs": ["2069_a"]},
+    {"key": "depenses_externes", "label": "Depenses externes", "patterns": [r"depenses de recherche ouvrant droit au credit d'impot"], "value_type": "number", "source_tabs": ["2069_a"]},
+    {"key": "nombre_projets_cir", "label": "Nombre de projets CIR", "patterns": [r"\bcir\b"], "value_type": "number", "source_tabs": ["rep_cout"]},
+    {"key": "nombre_projets_cii", "label": "Nombre de projets CII", "patterns": [r"\bcii\b"], "value_type": "number", "source_tabs": ["rep_cout"]},
 ]
 
 
@@ -108,7 +118,7 @@ def add_label(label: str, patterns_text: str, value_type: str) -> tuple[bool, st
     if not key:
         return False, "Label name must contain letters or numbers."
 
-    if value_type not in {"text", "number", "siren", "yes_no", "pole", "credit_choice", "year"}:
+    if value_type not in {"text", "number", "siren", "yes_no", "pole", "credit_choice", "year", "honoraires_type"}:
         return False, "Invalid value type."
 
     patterns = [part.strip() for part in patterns_text.split(",") if part.strip()]

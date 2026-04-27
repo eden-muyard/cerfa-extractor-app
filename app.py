@@ -122,7 +122,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> HTMLRes
     target_path.write_bytes(payload)
 
     extracted = extract_fields_from_workbook(str(target_path))
-    append_extraction(original_name, extracted)
+    save_status = append_extraction(original_name, extracted)
     cleanup_old_uploads()
 
     required_label_map = {
@@ -134,7 +134,10 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> HTMLRes
         key for key in sorted(context["required_keys"]) if not (extracted.get(key) or "").strip()
     ]
     context["result"] = extracted
-    context["message"] = "Extraction saved in database."
+    if save_status == "duplicate_skipped":
+        context["message"] = "Same extraction already exists for this file. Duplicate row skipped."
+    else:
+        context["message"] = "Extraction saved in database."
     context["missing_required_labels"] = [
         required_label_map.get(key, key) for key in missing_required_keys
     ]

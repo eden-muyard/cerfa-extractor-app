@@ -48,6 +48,8 @@ def canonical_sheet_name(raw_name: str) -> str | None:
         return "synthese"
     if "parametr" in normalized and "chiffrage" in normalized:
         return "parametres_chiffrage"
+    if "rep cout" in normalized or ("rep" in normalized and "cout" in normalized):
+        return "rep_cout"
     if "2069" in normalized and "a" in normalized:
         return "2069_a"
     return None
@@ -68,6 +70,17 @@ def normalize_pole(raw: str) -> str:
         return raw
     value = match.group(1).lower()
     return value.capitalize()
+
+
+def normalize_honoraires_type(raw: str) -> str:
+    text = normalize_text(raw)
+    if "palier" in text:
+        return "Fixe a palier"
+    if "fixe" in text:
+        return "Fixe"
+    if "%" in str(raw) or "pourcentage" in text or "percent" in text:
+        return "%age"
+    return str(raw).strip()
 
 
 def normalize_text(raw: Any) -> str:
@@ -174,7 +187,7 @@ def find_header_keyword_above(
 
 
 def extract_credit_amounts_from_synthese(sheet) -> dict[str, str]:
-    found = {"montant_credit_impot_cir": "", "montant_credit_impot_cii": ""}
+    found = {"montant_credit_impot_cir": "", "montant_credit_impot_cii": "", "montant_cic": ""}
     max_row = min(sheet.max_row or 400, 400)
     max_col = min(sheet.max_column or 40, 40)
     rows = list(
@@ -201,6 +214,10 @@ def extract_credit_amounts_from_synthese(sheet) -> dict[str, str]:
                 amount = extract_number(value)
                 if amount:
                     found["montant_credit_impot_cii"] = amount
+            if not found["montant_cic"] and find_header_keyword_above(rows, row_idx, col_idx, "cic"):
+                amount = extract_number(value)
+                if amount:
+                    found["montant_cic"] = amount
 
         # Fallback: many matrices place these in C/D on the same row.
         if not found["montant_credit_impot_cir"] and len(row) > 2:
@@ -211,8 +228,12 @@ def extract_credit_amounts_from_synthese(sheet) -> dict[str, str]:
             amount = extract_number(row[3])
             if amount:
                 found["montant_credit_impot_cii"] = amount
+        if not found["montant_cic"] and len(row) > 4:
+            amount = extract_number(row[4])
+            if amount:
+                found["montant_cic"] = amount
 
-        if found["montant_credit_impot_cir"] and found["montant_credit_impot_cii"]:
+        if found["montant_credit_impot_cir"] and found["montant_credit_impot_cii"] and found["montant_cic"]:
             break
 
     return found
@@ -286,6 +307,7 @@ def extract_synthese_depenses_by_columns(sheet, credit_choice: str | None) -> di
         "depenses_personnel": ["depenses", "personnel"],
         "depenses_veille": ["depenses", "veille"],
         "depenses_brevets": ["depenses", "brevets"],
+        "depenses_fonctionnement": ["depenses", "fonctionnement"],
         "subventions_avances_remboursables": ["subventions", "avances", "remboursables"],
     }
     result = {key: "" for key in fields}
@@ -387,6 +409,116 @@ def extract_prestataires_total_from_synthese(sheet, credit_choice: str | None) -
     return format_total_number(total)
 
 
+def count_project_columns_from_rep_cout(sheet) -> dict[str, str]:
+    cir_cols: set[int] = set()
+    cii_cols: set[int] = set()
+    max_row = min(sheet.max_row or 120, 120)
+    max_col = min(sheet.max_column or 200, 200)
+    for row in sheet.iter_rows(
+        min_row=1,
+        max_row=max_row,
+        min_col=1,
+        max_col=max_col,
+        values_only=True,
+    ):
+        for col_idx, value in enumerate(row):
+            text = normalize_text(value)
+            if not text:
+                continue
+            if re.fullmatch(r"cir", text):
+                cir_cols.add(col_idx)
+            if re.fullmatch(r"cii", text):
+                cii_cols.add(col_idx)
+    return {
+        "nombre_projets_cir": str(len(cir_cols)) if cir_cols else "",
+        "nombre_projets_cii": str(len(cii_cols)) if cii_cols else "",
+    }
+
+
+def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None) -> str:
+    target_year: int | None = None
+    if annee_valorisation and annee_valorisation.isdigit():
+        target_year = int(annee_valorisation) - 1
+    max_row = min(sheet.max_row or 400, 400)
+    max_col = min(sheet.max_column or 80, 80)
+    fallback_value = ""
+    for row in sheet.iter_rows(
+        min_row=1,
+        max_row=max_row,
+        min_col=1,
+        max_col=max_col,
+        values_only=True,
+    ):
+        row_text = " ".join(
+            normalize_text(value) for value in row if value is not None and str(value).strip()
+        )
+        if "hono" not in row_text and "honoraire" not in row_text:
+            continue
+        row_numbers = [extract_number(value) for value in row]
+        row_numbers = [number for number in row_numbers if number]
+        if row_numbers and not fallback_value:
+            fallback_value = row_numbers[0]
+        if target_year is None:
+            continue
+        year_found = any(str(target_year) in normalize_text(value) for value in row if value is not None)
+        if year_found and row_numbers:
+            return row_numbers[0]
+    return fallback_value
+
+
+def extract_line_amount_from_2069_row(row: tuple[Any, ...]) -> float | None:
+    numbers: list[float] = []
+    for value in row:
+        extracted = extract_number(value)
+        as_float = parse_number_to_float(extracted)
+        if as_float is not None:
+            numbers.append(as_float)
+    if not numbers:
+        return None
+    return numbers[-1]
+
+
+def extract_2069_line_totals(sheet) -> dict[str, str]:
+    internal_lines = {7, 8, 9, 10, 11, 12, 13}
+    external_lines = {14, 21}
+    internal_sum = 0.0
+    external_sum = 0.0
+    found_internal: set[int] = set()
+    found_external: set[int] = set()
+    max_row = min(sheet.max_row or 500, 500)
+    max_col = min(sheet.max_column or 80, 80)
+    for row in sheet.iter_rows(
+        min_row=1,
+        max_row=max_row,
+        min_col=1,
+        max_col=max_col,
+        values_only=True,
+    ):
+        row_text = " ".join(
+            normalize_text(value) for value in row if value is not None and str(value).strip()
+        )
+        if "ligne" not in row_text:
+            continue
+        for line_no in internal_lines.union(external_lines):
+            if line_no in found_internal or line_no in found_external:
+                continue
+            if not re.search(rf"\bligne\s*{line_no}\b", row_text):
+                continue
+            amount = extract_line_amount_from_2069_row(row)
+            if amount is None:
+                continue
+            if line_no in internal_lines:
+                internal_sum += amount
+                found_internal.add(line_no)
+            if line_no in external_lines:
+                external_sum += amount
+                found_external.add(line_no)
+    return {
+        "depenses_internes": format_total_number(internal_sum) if found_internal else "",
+        "depenses_externes": format_total_number(external_sum) if found_external else "",
+    }
+
+
 def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
     configured_fields = load_label_config()
     field_patterns = {
@@ -411,6 +543,15 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
         if not sheet_key:
             continue
         credit_choice = data.get("credit_parametres", "")
+        if sheet_key == "rep_cout":
+            project_counts = count_project_columns_from_rep_cout(sheet)
+            for key, value in project_counts.items():
+                if key in data and value:
+                    data[key] = value
+        if sheet_key == "parametres_chiffrage":
+            honoraires_n_1 = extract_honoraires_n_1_from_parametres(sheet, data.get("annee_valorisation"))
+            if "honoraires_n_1" in data and honoraires_n_1:
+                data["honoraires_n_1"] = honoraires_n_1
         if sheet_key == "synthese":
             credit_values = extract_credit_amounts_from_synthese(sheet)
             for key, value in credit_values.items():
@@ -427,6 +568,11 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
                 prestataires_total = extract_prestataires_total_from_synthese(sheet, credit_choice)
                 if prestataires_total:
                     data["depenses_prestataires_externes"] = prestataires_total
+        if sheet_key == "2069_a":
+            totals_2069 = extract_2069_line_totals(sheet)
+            for key, value in totals_2069.items():
+                if key in data and value:
+                    data[key] = value
         max_row = min(sheet.max_row or MAX_SCAN_ROWS, MAX_SCAN_ROWS)
         max_col = min(sheet.max_column or MAX_SCAN_COLS, MAX_SCAN_COLS)
         for row in sheet.iter_rows(
@@ -491,6 +637,18 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
                                 for candidate in candidate_values + [cell_text]:
                                     extracted = extract_year(candidate)
                                     if extracted:
+                                        break
+                            elif value_type == "honoraires_type":
+                                for candidate in candidate_values + [cell_text]:
+                                    candidate_text = str(candidate).strip()
+                                    normalized = normalize_text(candidate_text)
+                                    if (
+                                        "palier" in normalized
+                                        or "fixe" in normalized
+                                        or "%" in candidate_text
+                                        or "pourcentage" in normalized
+                                    ):
+                                        extracted = normalize_honoraires_type(candidate_text)
                                         break
                             if not extracted and value_type == "text":
                                 for candidate in candidate_values:
