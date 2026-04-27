@@ -24,21 +24,11 @@
     .pill { display: inline-block; background: #eef2ff; color: #243c9b; border-radius: 999px; padding: .2rem .6rem; margin: .2rem .2rem 0 0; font-size: .85rem; }
     .pill.required { background: #d9ecff; color: #0b4a99; }
     code { background: #f0f0f0; padding: .1rem .3rem; border-radius: 4px; }
-    .topbar { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
-    .logout { margin: 0; }
-    .logout button { background: #495057; padding: .45rem .8rem; }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="topbar">
-      <h1>CERFA 2069-A-SD Extractor</h1>
-      {% if auth_enabled %}
-        <form method="post" action="/logout" class="logout">
-          <button type="submit">Logout</button>
-        </form>
-      {% endif %}
-    </div>
+    <h1>CERFA 2069-A-SD Extractor</h1>
     <p class="hint">Upload a CERFA Excel file. The app extracts key values and saves each row in the shared database.</p>
     <p class="hint"><a href="/export/extractions.xlsx">Download latest extractions as Excel</a></p>
 

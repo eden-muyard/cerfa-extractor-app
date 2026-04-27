@@ -1,14 +1,14 @@
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta
+from base64 import b64decode
 import os
 import secrets
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
-from starlette.middleware.sessions import SessionMiddleware
 
 from extractor import extract_fields_from_workbook
 from label_config import (
@@ -24,29 +24,31 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "15")) * 1024 * 1024
 UPLOAD_RETENTION_DAYS = int(os.getenv("UPLOAD_RETENTION_DAYS", "14"))
-SESSION_SECRET = os.getenv("SESSION_SECRET", secrets.token_urlsafe(32))
 APP_USERNAME = os.getenv("APP_USERNAME", "").strip()
 APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
 AUTH_ENABLED = bool(APP_USERNAME and APP_PASSWORD)
 
 app = FastAPI(title="CERFA 2069-A-SD Extractor")
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SESSION_SECRET,
-    max_age=60 * 60 * 12,
-    same_site="lax",
-    https_only=False,
-)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-def is_authenticated(request: Request) -> bool:
+def ensure_authorized(request: Request) -> None:
     if not AUTH_ENABLED:
-        return True
-    session = request.scope.get("session")
-    if not isinstance(session, dict):
-        return False
-    return session.get("authenticated") is True
+        return
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Basic "):
+        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
+    encoded = auth_header[6:]
+    try:
+        decoded = b64decode(encoded).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except Exception as exc:
+        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"}) from exc
+    if not (
+        secrets.compare_digest(username, APP_USERNAME)
+        and secrets.compare_digest(password, APP_PASSWORD)
+    ):
+        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
 
 
 def cleanup_old_uploads() -> None:
@@ -76,12 +78,6 @@ def build_common_context(request: Request) -> dict:
     }
 
 
-def require_auth_redirect(request: Request) -> RedirectResponse | None:
-    if AUTH_ENABLED and not is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=303)
-    return None
-
-
 @app.on_event("startup")
 def startup() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -92,9 +88,7 @@ def startup() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request) -> HTMLResponse:
-    auth_redirect = require_auth_redirect(request)
-    if auth_redirect:
-        return auth_redirect
+    ensure_authorized(request)
     return templates.TemplateResponse(request, "index.html", build_common_context(request))
 
 
@@ -105,9 +99,7 @@ def healthz() -> dict[str, str]:
 
 @app.post("/upload", response_class=HTMLResponse)
 async def upload_file(request: Request, file: UploadFile = File(...)) -> HTMLResponse:
-    auth_redirect = require_auth_redirect(request)
-    if auth_redirect:
-        return auth_redirect
+    ensure_authorized(request)
     context = build_common_context(request)
     if not file.filename:
         context["error"] = "No file selected."
@@ -160,9 +152,7 @@ async def add_label_route(
     patterns: str = Form(""),
     value_type: str = Form("text"),
 ) -> HTMLResponse:
-    auth_redirect = require_auth_redirect(request)
-    if auth_redirect:
-        return auth_redirect
+    ensure_authorized(request)
     ok, msg = add_label(label, patterns, value_type)
     context = build_common_context(request)
     context["error"] = None if ok else msg
@@ -176,59 +166,18 @@ async def add_label_route(
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request) -> HTMLResponse:
-    if not AUTH_ENABLED:
-        return RedirectResponse(url="/", status_code=307)
-    if is_authenticated(request):
-        return RedirectResponse(url="/", status_code=307)
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"request": request, "error": None},
-    )
-
-
-@app.post("/login", response_class=HTMLResponse)
-async def login_submit(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-) -> HTMLResponse:
-    if not AUTH_ENABLED:
-        return RedirectResponse(url="/", status_code=307)
-    if username == APP_USERNAME and password == APP_PASSWORD:
-        session = request.scope.get("session")
-        if not isinstance(session, dict):
-            return templates.TemplateResponse(
-                request,
-                "login.html",
-                {"request": request, "error": "Session is unavailable. Please redeploy."},
-                status_code=500,
-            )
-        session["authenticated"] = True
-        return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"request": request, "error": "Invalid username or password."},
-        status_code=401,
-    )
+def login_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/", status_code=307)
 
 
 @app.post("/logout")
-def logout(request: Request) -> RedirectResponse:
-    session = request.scope.get("session")
-    if isinstance(session, dict):
-        session.clear()
-    target = "/login" if AUTH_ENABLED else "/"
-    return RedirectResponse(url=target, status_code=303)
+def logout() -> RedirectResponse:
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.get("/export/extractions.xlsx")
 def export_extractions(request: Request) -> StreamingResponse | RedirectResponse:
-    auth_redirect = require_auth_redirect(request)
-    if auth_redirect:
-        return auth_redirect
+    ensure_authorized(request)
     fields = load_label_config()
     headers = ["extracted_at", "source_file"] + [field["key"] for field in fields]
     rows = list_extractions()
