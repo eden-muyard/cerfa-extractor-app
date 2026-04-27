@@ -76,16 +76,10 @@ def build_common_context(request: Request) -> dict:
     }
 
 
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    if not AUTH_ENABLED:
-        return await call_next(request)
-    public_paths = {"/healthz", "/login"}
-    if request.url.path in public_paths:
-        return await call_next(request)
-    if is_authenticated(request):
-        return await call_next(request)
-    return RedirectResponse(url="/login", status_code=307)
+def require_auth_redirect(request: Request) -> RedirectResponse | None:
+    if AUTH_ENABLED and not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+    return None
 
 
 @app.on_event("startup")
@@ -98,6 +92,9 @@ def startup() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request) -> HTMLResponse:
+    auth_redirect = require_auth_redirect(request)
+    if auth_redirect:
+        return auth_redirect
     return templates.TemplateResponse(request, "index.html", build_common_context(request))
 
 
@@ -108,6 +105,9 @@ def healthz() -> dict[str, str]:
 
 @app.post("/upload", response_class=HTMLResponse)
 async def upload_file(request: Request, file: UploadFile = File(...)) -> HTMLResponse:
+    auth_redirect = require_auth_redirect(request)
+    if auth_redirect:
+        return auth_redirect
     context = build_common_context(request)
     if not file.filename:
         context["error"] = "No file selected."
@@ -160,6 +160,9 @@ async def add_label_route(
     patterns: str = Form(""),
     value_type: str = Form("text"),
 ) -> HTMLResponse:
+    auth_redirect = require_auth_redirect(request)
+    if auth_redirect:
+        return auth_redirect
     ok, msg = add_label(label, patterns, value_type)
     context = build_common_context(request)
     context["error"] = None if ok else msg
@@ -222,7 +225,10 @@ def logout(request: Request) -> RedirectResponse:
 
 
 @app.get("/export/extractions.xlsx")
-def export_extractions() -> StreamingResponse:
+def export_extractions(request: Request) -> StreamingResponse | RedirectResponse:
+    auth_redirect = require_auth_redirect(request)
+    if auth_redirect:
+        return auth_redirect
     fields = load_label_config()
     headers = ["extracted_at", "source_file"] + [field["key"] for field in fields]
     rows = list_extractions()
