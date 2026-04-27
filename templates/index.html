@@ -14,6 +14,7 @@
     button { border: 0; padding: .6rem 1rem; background: #2457ff; color: white; border-radius: 6px; cursor: pointer; }
     .error { background: #ffe5e5; color: #842029; padding: .8rem; border-radius: 6px; }
     .message { background: #e5ffec; color: #0f5132; padding: .8rem; border-radius: 6px; margin-bottom: .8rem; }
+    .warning { background: #fff6df; color: #7c5a00; padding: .8rem; border-radius: 6px; margin-bottom: .8rem; }
     .result { background: #e8f4ff; padding: 1rem; border-radius: 6px; }
     .config { background: #fff7e8; padding: 1rem; border-radius: 6px; margin-bottom: 1.2rem; }
     .result-grid { display: grid; grid-template-columns: 180px 1fr; row-gap: .5rem; column-gap: .8rem; }
@@ -23,11 +24,21 @@
     .pill { display: inline-block; background: #eef2ff; color: #243c9b; border-radius: 999px; padding: .2rem .6rem; margin: .2rem .2rem 0 0; font-size: .85rem; }
     .pill.required { background: #d9ecff; color: #0b4a99; }
     code { background: #f0f0f0; padding: .1rem .3rem; border-radius: 4px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
+    .logout { margin: 0; }
+    .logout button { background: #495057; padding: .45rem .8rem; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>CERFA 2069-A-SD Extractor</h1>
+    <div class="topbar">
+      <h1>CERFA 2069-A-SD Extractor</h1>
+      {% if auth_enabled %}
+        <form method="post" action="/logout" class="logout">
+          <button type="submit">Logout</button>
+        </form>
+      {% endif %}
+    </div>
     <p class="hint">Upload a CERFA Excel file. The app extracts key values and saves each row in the shared database.</p>
     <p class="hint"><a href="/export/extractions.xlsx">Download latest extractions as Excel</a></p>
 
@@ -36,6 +47,11 @@
     {% endif %}
     {% if message %}
       <div class="message">{{ message }}</div>
+    {% endif %}
+    {% if missing_required_labels %}
+      <div class="warning">
+        <strong>Missing required values:</strong> {{ missing_required_labels | join(", ") }}
+      </div>
     {% endif %}
 
     <div class="config">

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Businove CERFA Login</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; }
+    .container { max-width: 460px; background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 20px rgba(0, 0, 0, .08); }
+    h1 { margin-top: 0; }
+    .hint { color: #555; margin-top: 0; }
+    .error { background: #ffe5e5; color: #842029; padding: .8rem; border-radius: 6px; margin-bottom: .8rem; }
+    form { margin-top: 1rem; display: grid; gap: .7rem; }
+    input { padding: .55rem; border: 1px solid #ccc; border-radius: 6px; }
+    button { border: 0; padding: .65rem 1rem; background: #2457ff; color: white; border-radius: 6px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CERFA Extractor</h1>
+    <p class="hint">Businove team login required.</p>
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <input type="text" name="username" placeholder="Username" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>
