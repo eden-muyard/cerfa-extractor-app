@@ -6,6 +6,7 @@ import os
 import secrets
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Response
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from openpyxl import Workbook
@@ -176,7 +177,7 @@ def logout() -> RedirectResponse:
 
 
 @app.get("/export/extractions.xlsx")
-def export_extractions(request: Request) -> StreamingResponse | RedirectResponse:
+def export_extractions(request: Request) -> Response:
     ensure_authorized(request)
     fields = load_label_config()
     headers = ["extracted_at", "source_file"] + [field["key"] for field in fields]
