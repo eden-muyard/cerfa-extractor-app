@@ -410,113 +410,18 @@ def extract_prestataires_total_from_synthese(sheet, credit_choice: str | None) -
 
 
 def count_project_columns_from_rep_cout(sheet) -> dict[str, str]:
-    cir_cols: set[int] = set()
-    cii_cols: set[int] = set()
-    max_row = min(sheet.max_row or 120, 120)
-    max_col = min(sheet.max_column or 200, 200)
-    for row in sheet.iter_rows(
-        min_row=1,
-        max_row=max_row,
-        min_col=1,
-        max_col=max_col,
-        values_only=True,
-    ):
-        for col_idx, value in enumerate(row):
-            text = normalize_text(value)
-            if not text:
-                continue
-            if re.fullmatch(r"cir", text):
-                cir_cols.add(col_idx)
-            if re.fullmatch(r"cii", text):
-                cii_cols.add(col_idx)
-    return {
-        "nombre_projets_cir": str(len(cir_cols)) if cir_cols else "",
-        "nombre_projets_cii": str(len(cii_cols)) if cii_cols else "",
-    }
+    def is_value_like(raw: Any) -> bool:
+        if raw is None:
+            return False
+        text = str(raw).strip()
+        if not text or text in {"-", "--", "---"}:
+            return False
+        number = extract_number(raw)
+        parsed = parse_number_to_float(number)
+        return parsed is not None and abs(parsed) > 0
 
-
-def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None) -> str:
-    def get_year_from_text(value: Any) -> int | None:
-        text = normalize_text(value)
-        if not text:
-            return None
-        match = YEAR_REGEX.search(text)
-        if not match:
-            return None
-        year = int(match.group(1))
-        if 1990 <= year <= 2100:
-            return year
-        return None
-
-    def get_hono_value_from_cell(value: Any) -> str:
-        extracted = extract_number(value)
-        return extracted or ""
-
-    def contains_hono_keyword(value: Any) -> bool:
-        text = normalize_text(value)
-        return "hono" in text or "honoraire" in text
-
-    def extract_from_horizontal_headers(rows: list[tuple[Any, ...]], target: int) -> str:
-        for header_row_idx, header_row in enumerate(rows):
-            year_columns: dict[int, int] = {}
-            for col_idx, cell in enumerate(header_row):
-                year = get_year_from_text(cell)
-                if year:
-                    year_columns[col_idx] = year
-            if target not in year_columns.values():
-                continue
-            target_cols = [col for col, year in year_columns.items() if year == target]
-            for row_idx in range(max(0, header_row_idx - 8), min(len(rows), header_row_idx + 9)):
-                row = rows[row_idx]
-                if not any(contains_hono_keyword(cell) for cell in row):
-                    continue
-                for target_col in target_cols:
-                    if target_col >= len(row):
-                        continue
-                    amount = get_hono_value_from_cell(row[target_col])
-                    if amount:
-                        return amount
-        return ""
-
-    def extract_from_vertical_headers(rows: list[tuple[Any, ...]], target: int) -> str:
-        max_cols = max((len(row) for row in rows), default=0)
-        for col_idx in range(max_cols):
-            year_rows: dict[int, int] = {}
-            for row_idx, row in enumerate(rows):
-                if col_idx >= len(row):
-                    continue
-                year = get_year_from_text(row[col_idx])
-                if year:
-                    year_rows[row_idx] = year
-            if target not in year_rows.values():
-                continue
-            target_rows = [row_idx for row_idx, year in year_rows.items() if year == target]
-            for check_col in range(max(0, col_idx - 8), min(max_cols, col_idx + 9)):
-                has_hono_label = False
-                for row_idx, row in enumerate(rows):
-                    if check_col >= len(row):
-                        continue
-                    if contains_hono_keyword(row[check_col]):
-                        has_hono_label = True
-                        break
-                if not has_hono_label:
-                    continue
-                for target_row in target_rows:
-                    if target_row >= len(rows):
-                        continue
-                    row = rows[target_row]
-                    if check_col >= len(row):
-                        continue
-                    amount = get_hono_value_from_cell(row[check_col])
-                    if amount:
-                        return amount
-        return ""
-
-    target_year: int | None = None
-    if annee_valorisation and annee_valorisation.isdigit():
-        target_year = int(annee_valorisation) - 1
-    max_row = min(sheet.max_row or 400, 400)
-    max_col = min(sheet.max_column or 80, 80)
+    max_row = min(sheet.max_row or 240, 240)
+    max_col = min(sheet.max_column or 220, 220)
     rows = list(
         sheet.iter_rows(
             min_row=1,
@@ -527,31 +432,153 @@ def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None
         )
     )
 
-    if target_year is not None:
-        horizontal_amount = extract_from_horizontal_headers(rows, target_year)
-        if horizontal_amount:
-            return horizontal_amount
-        vertical_amount = extract_from_vertical_headers(rows, target_year)
-        if vertical_amount:
-            return vertical_amount
+    def find_section_anchor(section_key: str) -> int | None:
+        for row_idx, row in enumerate(rows):
+            for value in row:
+                text = normalize_text(value)
+                if section_key == "cir" and re.search(r"credit d'impot recherche|\bcir\b", text):
+                    return row_idx
+                if section_key == "cii" and re.search(r"credit d'impot innovation|\bcii\b", text):
+                    return row_idx
+        return None
 
-    fallback_value = ""
-    for row in rows:
-        row_text = " ".join(
-            normalize_text(value) for value in row if value is not None and str(value).strip()
+    def count_projects_in_section(section_key: str, start_row: int, end_row: int) -> int:
+        candidate_cols: set[int] = set()
+        for row_idx in range(start_row, min(end_row + 1, start_row + 6)):
+            row = rows[row_idx]
+            for col_idx, value in enumerate(row):
+                text = normalize_text(value)
+                if not text or col_idx == 0:
+                    continue
+                if "total" in text or "non rattache" in text:
+                    continue
+                if "projet" in text or re.fullmatch(r"cir", text) or re.fullmatch(r"cii", text):
+                    candidate_cols.add(col_idx)
+
+        if not candidate_cols:
+            max_len = max((len(rows[r]) for r in range(start_row, end_row + 1)), default=0)
+            for col_idx in range(1, max_len):
+                header_text = " ".join(
+                    normalize_text(rows[r][col_idx])
+                    for r in range(start_row, min(end_row + 1, start_row + 6))
+                    if col_idx < len(rows[r]) and rows[r][col_idx] is not None
+                )
+                if "total" in header_text or "non rattache" in header_text:
+                    continue
+                if "projet" in header_text or section_key in header_text:
+                    candidate_cols.add(col_idx)
+
+        value_rows = range(min(end_row, start_row + 3), end_row + 1)
+        count = 0
+        for col_idx in sorted(candidate_cols):
+            has_value = False
+            for row_idx in value_rows:
+                row = rows[row_idx]
+                if col_idx >= len(row):
+                    continue
+                left_label = normalize_text(row[0]) if row and row[0] is not None else ""
+                if "total" in left_label:
+                    continue
+                if is_value_like(row[col_idx]):
+                    has_value = True
+                    break
+            if has_value:
+                count += 1
+        return count
+
+    cir_anchor = find_section_anchor("cir")
+    cii_anchor = find_section_anchor("cii")
+    cir_count = 0
+    cii_count = 0
+    if cir_anchor is not None:
+        cir_end = (cii_anchor - 1) if cii_anchor is not None and cii_anchor > cir_anchor else min(len(rows) - 1, cir_anchor + 70)
+        cir_count = count_projects_in_section("cir", cir_anchor, cir_end)
+    if cii_anchor is not None:
+        cii_end = min(len(rows) - 1, cii_anchor + 70)
+        cii_count = count_projects_in_section("cii", cii_anchor, cii_end)
+
+    return {
+        "nombre_projets_cir": str(cir_count),
+        "nombre_projets_cii": str(cii_count),
+    }
+
+
+def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None) -> str:
+    def get_year(value: Any) -> int | None:
+        text = normalize_text(value)
+        if not text:
+            return None
+        match = YEAR_REGEX.search(text)
+        if not match:
+            return None
+        year = int(match.group(1))
+        return year if 1990 <= year <= 2100 else None
+
+    def is_hono_label(value: Any) -> bool:
+        text = normalize_text(value)
+        return "hono" in text or "honoraire" in text
+
+    def number_at(rows: list[list[Any]], row_idx: int, col_idx: int) -> str:
+        if row_idx < 0 or col_idx < 0:
+            return ""
+        if row_idx >= len(rows):
+            return ""
+        row = rows[row_idx]
+        if col_idx >= len(row):
+            return ""
+        extracted = extract_number(row[col_idx])
+        return extracted or ""
+
+    target_year: int | None = None
+    if annee_valorisation and annee_valorisation.isdigit():
+        target_year = int(annee_valorisation) - 1
+    if target_year is None:
+        return ""
+
+    max_row = min(sheet.max_row or 500, 500)
+    max_col = min(sheet.max_column or 120, 120)
+    rows = [
+        list(row)
+        for row in sheet.iter_rows(
+            min_row=1,
+            max_row=max_row,
+            min_col=1,
+            max_col=max_col,
+            values_only=True,
         )
-        if "hono" not in row_text and "honoraire" not in row_text:
-            continue
-        row_numbers = [extract_number(value) for value in row]
-        row_numbers = [number for number in row_numbers if number]
-        if row_numbers and not fallback_value:
-            fallback_value = row_numbers[0]
-        if target_year is None:
-            continue
-        year_found = any(get_year_from_text(value) == target_year for value in row if value is not None)
-        if year_found and row_numbers:
-            return row_numbers[0]
-    return fallback_value
+    ]
+
+    target_year_positions: list[tuple[int, int]] = []
+    hono_positions: list[tuple[int, int]] = []
+    for r_idx, row in enumerate(rows):
+        for c_idx, value in enumerate(row):
+            year = get_year(value)
+            if year == target_year:
+                target_year_positions.append((r_idx, c_idx))
+            if is_hono_label(value):
+                hono_positions.append((r_idx, c_idx))
+
+    for y_row, y_col in target_year_positions:
+        for h_row, h_col in hono_positions:
+            if abs(y_row - h_row) <= 8:
+                amount = number_at(rows, h_row, y_col)
+                if amount:
+                    return amount
+                for delta in (-2, -1, 1, 2):
+                    amount = number_at(rows, h_row, y_col + delta)
+                    if amount:
+                        return amount
+            if abs(y_col - h_col) <= 8:
+                amount = number_at(rows, y_row, h_col)
+                if amount:
+                    return amount
+                for delta in (-2, -1, 1, 2):
+                    amount = number_at(rows, y_row + delta, h_col)
+                    if amount:
+                        return amount
+
+    # Do not fallback to another year when requested target year exists but no aligned value found.
+    return ""
 
 
 def extract_line_amount_from_2069_row(row: tuple[Any, ...]) -> float | None:
