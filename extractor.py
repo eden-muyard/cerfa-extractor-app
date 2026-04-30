@@ -581,6 +581,42 @@ def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None
     return ""
 
 
+def extract_project_counts_from_parametres(sheet) -> dict[str, str]:
+    max_row = min(sheet.max_row or 500, 500)
+    max_col = min(sheet.max_column or 120, 120)
+    for row in sheet.iter_rows(
+        min_row=1,
+        max_row=max_row,
+        min_col=1,
+        max_col=max_col,
+        values_only=True,
+    ):
+        for idx, value in enumerate(row):
+            label_text = normalize_text(value)
+            if not label_text:
+                continue
+            if "argumentaire" not in label_text:
+                continue
+            cir_value = ""
+            cii_value = ""
+            if idx + 1 < len(row):
+                cir_number = extract_number(row[idx + 1])
+                if cir_number is not None:
+                    cir_value = str(int(float(cir_number)))
+            if idx + 2 < len(row):
+                cii_number = extract_number(row[idx + 2])
+                if cii_number is not None:
+                    cii_value = str(int(float(cii_number)))
+            return {
+                "nombre_projets_cir": cir_value,
+                "nombre_projets_cii": cii_value,
+            }
+    return {
+        "nombre_projets_cir": "",
+        "nombre_projets_cii": "",
+    }
+
+
 def extract_line_amount_from_2069_row(row: tuple[Any, ...]) -> float | None:
     numbers: list[float] = []
     for value in row:
@@ -667,6 +703,10 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
             honoraires_n_1 = extract_honoraires_n_1_from_parametres(sheet, data.get("annee_valorisation"))
             if "honoraires_n_1" in data and honoraires_n_1:
                 data["honoraires_n_1"] = honoraires_n_1
+            project_counts_from_parametres = extract_project_counts_from_parametres(sheet)
+            for key, value in project_counts_from_parametres.items():
+                if key in data and value != "":
+                    data[key] = value
         if sheet_key == "synthese":
             credit_values = extract_credit_amounts_from_synthese(sheet)
             for key, value in credit_values.items():
