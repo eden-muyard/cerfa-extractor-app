@@ -183,6 +183,7 @@ def logout() -> RedirectResponse:
 def export_extractions(request: Request) -> Response:
     ensure_authorized(request)
     fields = load_label_config()
+    field_types = {field["key"]: field.get("value_type", "text") for field in fields}
     headers = ["extracted_at", "source_file"] + [field["key"] for field in fields]
     rows = list_extractions()
 
@@ -191,8 +192,26 @@ def export_extractions(request: Request) -> Response:
     sheet.title = "ExtractedData"
     sheet.append(headers)
 
+    def coerce_cell(header: str, raw: object) -> object:
+        if raw is None:
+            return ""
+        if header in {"extracted_at", "source_file"}:
+            return str(raw)
+        if field_types.get(header) == "number":
+            text = str(raw).strip()
+            if not text:
+                return ""
+            try:
+                as_float = float(text)
+            except ValueError:
+                return text
+            if as_float.is_integer():
+                return int(as_float)
+            return as_float
+        return raw
+
     for row_data in rows:
-        sheet.append([row_data.get(header, "") for header in headers])
+        sheet.append([coerce_cell(header, row_data.get(header, "")) for header in headers])
 
     output = BytesIO()
     workbook.save(output)
