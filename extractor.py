@@ -3,6 +3,7 @@ import unicodedata
 from typing import Any
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from label_config import load_label_config
 
@@ -46,7 +47,8 @@ def canonical_sheet_name(raw_name: str) -> str | None:
     normalized = normalize_sheet_name(raw_name)
     if "synthese" in normalized:
         return "synthese"
-    if "parametr" in normalized and "chiffrage" in normalized:
+    # Paramètre(s) chiffrage(s) — match "parametr…" prefix so singular/plural both work
+    if "chiffrage" in normalized and "parametr" in normalized:
         return "parametres_chiffrage"
     if "rep cout" in normalized or ("rep" in normalized and "cout" in normalized):
         return "rep_cout"
@@ -503,82 +505,107 @@ def count_project_columns_from_rep_cout(sheet) -> dict[str, str]:
     }
 
 
-def extract_honoraires_n_1_from_parametres(sheet, annee_valorisation: str | None) -> str:
-    def get_year(value: Any) -> int | None:
-        text = normalize_text(value)
-        if not text:
-            return None
-        match = YEAR_REGEX.search(text)
-        if not match:
-            return None
-        year = int(match.group(1))
-        return year if 1990 <= year <= 2100 else None
-
-    def is_hono_label(value: Any) -> bool:
-        text = normalize_text(value)
-        return "hono" in text or "honoraire" in text
-
-    def number_at(rows: list[list[Any]], row_idx: int, col_idx: int) -> str:
-        if row_idx < 0 or col_idx < 0:
-            return ""
-        if row_idx >= len(rows):
-            return ""
-        row = rows[row_idx]
-        if col_idx >= len(row):
-            return ""
-        extracted = extract_number(row[col_idx])
-        return extracted or ""
-
-    target_year: int | None = None
-    if annee_valorisation and annee_valorisation.isdigit():
-        target_year = int(annee_valorisation) - 1
-    if target_year is None:
+def normalize_cell_to_amount_string(value: Any) -> str:
+    """Convert an Excel cell value to our canonical amount string (empty if not a usable number)."""
+    if value is None:
         return ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if abs(float(value)) < 1e-9:
+            return "0"
+        return format_total_number(float(value))
+    text = str(value).strip()
+    if not text or text in {"-", "--", "---"}:
+        return ""
+    extracted = extract_number(value)
+    return extracted or ""
 
-    max_row = min(sheet.max_row or 500, 500)
-    max_col = min(sheet.max_column or 120, 120)
-    rows = [
-        list(row)
-        for row in sheet.iter_rows(
-            min_row=1,
-            max_row=max_row,
-            min_col=1,
-            max_col=max_col,
-            values_only=True,
-        )
+
+def cell_effective_value(ws, row: int, col: int) -> Any:
+    """
+    Excel value at (row, col). If the cell is inside a merged range, value lives on the
+    top-left cell of the merge — mirror Excel behaviour (fixes empty G13/C13 when merged).
+    """
+    coord = f"{get_column_letter(col)}{row}"
+    try:
+        direct = ws[coord].value
+        if direct is not None:
+            return direct
+    except Exception:
+        pass
+    cell = ws.cell(row=row, column=col)
+    if cell.value is not None:
+        return cell.value
+    try:
+        for mr in ws.merged_cells.ranges:
+            if mr.min_row <= row <= mr.max_row and mr.min_col <= col <= mr.max_col:
+                return ws.cell(row=mr.min_row, column=mr.min_col).value
+    except Exception:
+        pass
+    return cell.value
+
+
+def first_parametres_chiffrage_worksheet(wb) -> Any | None:
+    """Premier onglet Paramètres chiffrage (ordre des feuilles dans le classeur)."""
+    for ws in wb.worksheets:
+        if canonical_sheet_name(ws.title) == "parametres_chiffrage":
+            return ws
+    return None
+
+
+def pick_parametres_chiffrage_worksheet(wb) -> Any | None:
+    """
+    Choisit l'onglet Paramètres chiffrage à utiliser pour C13/G13.
+    S'il n'y en a qu'un, on le prend. S'il y en a plusieurs (copies / brouillons),
+    on préfère celui où G13 ou C13 porte une valeur numérique exploitable,
+    sinon le premier dans l'ordre Excel.
+    """
+    candidates = [
+        ws for ws in wb.worksheets if canonical_sheet_name(ws.title) == "parametres_chiffrage"
     ]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
 
-    target_year_positions: list[tuple[int, int]] = []
-    hono_positions: list[tuple[int, int]] = []
-    for r_idx, row in enumerate(rows):
-        for c_idx, value in enumerate(row):
-            year = get_year(value)
-            if year == target_year:
-                target_year_positions.append((r_idx, c_idx))
-            if is_hono_label(value):
-                hono_positions.append((r_idx, c_idx))
+    def score_sheet(ws: Any) -> tuple[int, int]:
+        g = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 7))
+        c = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 3))
+        filled = (1 if g else 0) + (1 if c else 0)
+        # Conserver l'ordre d'apparition dans le classeur pour départager les ex-aequo
+        idx = candidates.index(ws)
+        return (-filled, idx)
 
-    for y_row, y_col in target_year_positions:
-        for h_row, h_col in hono_positions:
-            if abs(y_row - h_row) <= 8:
-                amount = number_at(rows, h_row, y_col)
-                if amount:
-                    return amount
-                for delta in (-2, -1, 1, 2):
-                    amount = number_at(rows, h_row, y_col + delta)
-                    if amount:
-                        return amount
-            if abs(y_col - h_col) <= 8:
-                amount = number_at(rows, y_row, h_col)
-                if amount:
-                    return amount
-                for delta in (-2, -1, 1, 2):
-                    amount = number_at(rows, y_row + delta, h_col)
-                    if amount:
-                        return amount
+    return sorted(candidates, key=score_sheet)[0]
 
-    # Do not fallback to another year when requested target year exists but no aligned value found.
-    return ""
+
+def apply_fixed_parametres_hono_cells(file_path: str, data: dict[str, str]) -> None:
+    """
+    Honoraires n-1 : uniquement la cellule G13 (ligne 13, colonne 7).
+    Hono (année) : uniquement C13 sur la même feuille.
+    Deuxième lecture sans data_only uniquement si une valeur est encore vide (formules non calculées).
+    """
+    def read_c13_g13(data_only: bool) -> tuple[str, str]:
+        wb = load_workbook(file_path, data_only=data_only, read_only=False)
+        try:
+            ws = pick_parametres_chiffrage_worksheet(wb)
+            if ws is None:
+                return "", ""
+            c_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 3))
+            g_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 7))
+            return c_val, g_val
+        finally:
+            wb.close()
+
+    c_amt, g_amt = read_c13_g13(True)
+    if not c_amt or not g_amt:
+        c2, g2 = read_c13_g13(False)
+        if not c_amt:
+            c_amt = c2
+        if not g_amt:
+            g_amt = g2
+
+    data["honoraires"] = c_amt
+    data["honoraires_n_1"] = g_amt
 
 
 def extract_project_counts_from_parametres(sheet) -> dict[str, str]:
@@ -700,9 +727,8 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
                 if key in data and value:
                     data[key] = value
         if sheet_key == "parametres_chiffrage":
-            honoraires_n_1 = extract_honoraires_n_1_from_parametres(sheet, data.get("annee_valorisation"))
-            if "honoraires_n_1" in data and honoraires_n_1:
-                data["honoraires_n_1"] = honoraires_n_1
+            # Hono (année) = C13, Honoraires n-1 = G13 — applied once at end via
+            # apply_fixed_parametres_hono_cells() (direct ws['C13']/ws['G13'], non-read-only).
             project_counts_from_parametres = extract_project_counts_from_parametres(sheet)
             for key, value in project_counts_from_parametres.items():
                 if key in data and value != "":
@@ -750,6 +776,12 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
 
                 for field, patterns in field_patterns.items():
                     if data[field]:
+                        continue
+                    # Fixed cells C13/G13 on Paramètres chiffrage — do not guess from "hono" patterns here.
+                    if sheet_key == "parametres_chiffrage" and field in (
+                        "honoraires",
+                        "honoraires_n_1",
+                    ):
                         continue
                     source_tabs = field_source_tabs.get(field, set())
                     if source_tabs and sheet_key not in source_tabs:
@@ -824,4 +856,6 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
         if all(data.values()):
             break
 
+    workbook.close()
+    apply_fixed_parametres_hono_cells(file_path, data)
     return data
