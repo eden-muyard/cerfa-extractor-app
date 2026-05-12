@@ -32,8 +32,8 @@ REQUIRED_FIELDS = [
     {"key": "subventions_avances_remboursables", "label": "Subventions et avances remboursables", "patterns": [r"subventions?\s+et\s+avances?\s+remboursables?", r"subventions?"], "value_type": "number", "source_tabs": ["synthese"]},
     {"key": "depenses_internes", "label": "Depenses internes", "patterns": [r"montant total des depenses de recherche realisees"], "value_type": "number", "source_tabs": ["2069_a"]},
     {"key": "depenses_externes", "label": "Depenses externes", "patterns": [r"depenses de recherche ouvrant droit au credit d'impot"], "value_type": "number", "source_tabs": ["2069_a"]},
-    {"key": "nombre_projets_cir", "label": "Nombre de projets CIR", "patterns": [r"\bcir\b"], "value_type": "number", "source_tabs": ["rep_cout"]},
-    {"key": "nombre_projets_cii", "label": "Nombre de projets CII", "patterns": [r"\bcii\b"], "value_type": "number", "source_tabs": ["rep_cout"]},
+    {"key": "nombre_projets_cir", "label": "Nombre de projets CIR", "patterns": [r"\bcir\b"], "value_type": "number", "source_tabs": ["parametres_chiffrage", "rep_cout"]},
+    {"key": "nombre_projets_cii", "label": "Nombre de projets CII", "patterns": [r"\bcii\b"], "value_type": "number", "source_tabs": ["parametres_chiffrage", "rep_cout"]},
 ]
 
 

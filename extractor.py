@@ -554,9 +554,9 @@ def first_parametres_chiffrage_worksheet(wb) -> Any | None:
 
 def pick_parametres_chiffrage_worksheet(wb) -> Any | None:
     """
-    Choisit l'onglet Paramètres chiffrage à utiliser pour C13/G13.
+    Choisit l'onglet Paramètres chiffrage pour C13/G13/D15/E15.
     S'il n'y en a qu'un, on le prend. S'il y en a plusieurs (copies / brouillons),
-    on préfère celui où G13 ou C13 porte une valeur numérique exploitable,
+    on préfère celui où le plus de cellules fixes sont renseignées,
     sinon le premier dans l'ordre Excel.
     """
     candidates = [
@@ -570,7 +570,9 @@ def pick_parametres_chiffrage_worksheet(wb) -> Any | None:
     def score_sheet(ws: Any) -> tuple[int, int]:
         g = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 7))
         c = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 3))
-        filled = (1 if g else 0) + (1 if c else 0)
+        d15 = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 4))
+        e15 = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 5))
+        filled = (1 if g else 0) + (1 if c else 0) + (1 if d15 else 0) + (1 if e15 else 0)
         # Conserver l'ordre d'apparition dans le classeur pour départager les ex-aequo
         idx = candidates.index(ws)
         return (-filled, idx)
@@ -578,34 +580,50 @@ def pick_parametres_chiffrage_worksheet(wb) -> Any | None:
     return sorted(candidates, key=score_sheet)[0]
 
 
-def apply_fixed_parametres_hono_cells(file_path: str, data: dict[str, str]) -> None:
+def apply_fixed_parametres_cells(file_path: str, data: dict[str, str]) -> None:
     """
-    Honoraires n-1 : uniquement la cellule G13 (ligne 13, colonne 7).
-    Hono (année) : uniquement C13 sur la même feuille.
-    Deuxième lecture sans data_only uniquement si une valeur est encore vide (formules non calculées).
+    Lecture directe sur Paramètres chiffrage (même onglet que pick_parametres_chiffrage_worksheet) :
+    - Hono (année) : C13 (colonne 3, ligne 13)
+    - Honoraires n-1 : G13 (colonne 7, ligne 13)
+    - Nombre de projets CIR : D15 (colonne 4, ligne 15)
+    - Nombre de projets CII : E15 (colonne 5, ligne 15)
+
+    Seconde passe avec data_only=False uniquement pour les cellules encore vides
+    (formules sans valeur calculée en cache).
     """
-    def read_c13_g13(data_only: bool) -> tuple[str, str]:
+    def read_fixed_cells(data_only: bool) -> tuple[str, str, str, str]:
         wb = load_workbook(file_path, data_only=data_only, read_only=False)
         try:
             ws = pick_parametres_chiffrage_worksheet(wb)
             if ws is None:
-                return "", ""
+                return "", "", "", ""
             c_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 3))
             g_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 7))
-            return c_val, g_val
+            cir_val = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 4))
+            cii_val = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 5))
+            return c_val, g_val, cir_val, cii_val
         finally:
             wb.close()
 
-    c_amt, g_amt = read_c13_g13(True)
-    if not c_amt or not g_amt:
-        c2, g2 = read_c13_g13(False)
+    c_amt, g_amt, cir_n, cii_n = read_fixed_cells(True)
+    if not c_amt or not g_amt or not cir_n or not cii_n:
+        c2, g2, cir2, cii2 = read_fixed_cells(False)
         if not c_amt:
             c_amt = c2
         if not g_amt:
             g_amt = g2
+        if not cir_n:
+            cir_n = cir2
+        if not cii_n:
+            cii_n = cii2
 
     data["honoraires"] = c_amt
     data["honoraires_n_1"] = g_amt
+    # D15/E15 : si renseignées (y compris 0), elles priment ; sinon on garde REP cout / heuristiques.
+    if cir_n != "":
+        data["nombre_projets_cir"] = cir_n
+    if cii_n != "":
+        data["nombre_projets_cii"] = cii_n
 
 
 def extract_project_counts_from_parametres(sheet) -> dict[str, str]:
@@ -727,8 +745,8 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
                 if key in data and value:
                     data[key] = value
         if sheet_key == "parametres_chiffrage":
-            # Hono (année) = C13, Honoraires n-1 = G13 — applied once at end via
-            # apply_fixed_parametres_hono_cells() (direct ws['C13']/ws['G13'], non-read-only).
+            # C13/G13 honoraires + D15/E15 nb projets — valeurs définitives via
+            # apply_fixed_parametres_cells() en fin de pipeline.
             project_counts_from_parametres = extract_project_counts_from_parametres(sheet)
             for key, value in project_counts_from_parametres.items():
                 if key in data and value != "":
@@ -777,10 +795,12 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
                 for field, patterns in field_patterns.items():
                     if data[field]:
                         continue
-                    # Fixed cells C13/G13 on Paramètres chiffrage — do not guess from "hono" patterns here.
+                    # Cellules fixes Paramètres chiffrage — pas d'heuristique par motif sur ces champs.
                     if sheet_key == "parametres_chiffrage" and field in (
                         "honoraires",
                         "honoraires_n_1",
+                        "nombre_projets_cir",
+                        "nombre_projets_cii",
                     ):
                         continue
                     source_tabs = field_source_tabs.get(field, set())
@@ -857,5 +877,5 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
             break
 
     workbook.close()
-    apply_fixed_parametres_hono_cells(file_path, data)
+    apply_fixed_parametres_cells(file_path, data)
     return data
