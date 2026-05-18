@@ -535,12 +535,13 @@ def cell_effective_value(ws, row: int, col: int) -> Any:
     cell = ws.cell(row=row, column=col)
     if cell.value is not None:
         return cell.value
-    try:
-        for mr in ws.merged_cells.ranges:
-            if mr.min_row <= row <= mr.max_row and mr.min_col <= col <= mr.max_col:
-                return ws.cell(row=mr.min_row, column=mr.min_col).value
-    except Exception:
-        pass
+    if not getattr(ws.parent, "read_only", False):
+        try:
+            for mr in ws.merged_cells.ranges:
+                if mr.min_row <= row <= mr.max_row and mr.min_col <= col <= mr.max_col:
+                    return ws.cell(row=mr.min_row, column=mr.min_col).value
+        except Exception:
+            pass
     return cell.value
 
 
@@ -580,6 +581,15 @@ def pick_parametres_chiffrage_worksheet(wb) -> Any | None:
     return sorted(candidates, key=score_sheet)[0]
 
 
+def read_fixed_parametres_cells_from_ws(ws) -> tuple[str, str, str, str]:
+    """C13, G13, D15, E15 sur une feuille Paramètres chiffrage déjà ouverte."""
+    c_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 3))
+    g_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 7))
+    cir_val = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 4))
+    cii_val = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 5))
+    return c_val, g_val, cir_val, cii_val
+
+
 def apply_fixed_parametres_cells(file_path: str, data: dict[str, str]) -> None:
     """
     Lecture directe sur Paramètres chiffrage (même onglet que pick_parametres_chiffrage_worksheet) :
@@ -588,26 +598,22 @@ def apply_fixed_parametres_cells(file_path: str, data: dict[str, str]) -> None:
     - Nombre de projets CIR : D15 (colonne 4, ligne 15)
     - Nombre de projets CII : E15 (colonne 5, ligne 15)
 
-    Seconde passe avec data_only=False uniquement pour les cellules encore vides
-    (formules sans valeur calculée en cache).
+    Passe 1 : read_only + data_only (léger, adapté au plan Render 512 Mo).
+    Passe 2 : chargement complet uniquement si des cellules sont encore vides.
     """
-    def read_fixed_cells(data_only: bool) -> tuple[str, str, str, str]:
-        wb = load_workbook(file_path, data_only=data_only, read_only=False)
+    def read_fixed_cells(data_only: bool, read_only: bool) -> tuple[str, str, str, str]:
+        wb = load_workbook(file_path, data_only=data_only, read_only=read_only)
         try:
             ws = pick_parametres_chiffrage_worksheet(wb)
             if ws is None:
                 return "", "", "", ""
-            c_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 3))
-            g_val = normalize_cell_to_amount_string(cell_effective_value(ws, 13, 7))
-            cir_val = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 4))
-            cii_val = normalize_cell_to_amount_string(cell_effective_value(ws, 15, 5))
-            return c_val, g_val, cir_val, cii_val
+            return read_fixed_parametres_cells_from_ws(ws)
         finally:
             wb.close()
 
-    c_amt, g_amt, cir_n, cii_n = read_fixed_cells(True)
+    c_amt, g_amt, cir_n, cii_n = read_fixed_cells(True, True)
     if not c_amt or not g_amt or not cir_n or not cii_n:
-        c2, g2, cir2, cii2 = read_fixed_cells(False)
+        c2, g2, cir2, cii2 = read_fixed_cells(False, False)
         if not c_amt:
             c_amt = c2
         if not g_amt:
