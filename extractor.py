@@ -1,11 +1,14 @@
+import os
 import re
 import unicodedata
+import zipfile
 from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from label_config import load_label_config
+from xlsx_cells import read_parametres_fixed_cells, workbook_sheet_paths
 
 SIREN_REGEX = re.compile(r"\b(\d{3}\s?\d{3}\s?\d{3})\b")
 AMOUNT_REGEX = re.compile(r"(-?\d[\d\s.,]*)")
@@ -15,6 +18,27 @@ DUAL_CREDIT_REGEX = re.compile(r"\bcir\s*[\/\-\+]\s*cii\b|\bcii\s*[\/\-\+]\s*cir
 YEAR_REGEX = re.compile(r"\b(20\d{2})\b")
 MAX_SCAN_ROWS = 2500
 MAX_SCAN_COLS = 120
+
+
+def _on_render_free_tier() -> bool:
+    return bool(os.getenv("RENDER"))
+
+
+def effective_scan_limits() -> tuple[int, int]:
+    """Lower scan bounds on Render to stay under the 512 MB instance limit."""
+    if _on_render_free_tier():
+        return 500, 50
+    return MAX_SCAN_ROWS, MAX_SCAN_COLS
+
+
+def list_canonical_sheet_names(file_path: str) -> list[tuple[str, str]]:
+    """Sheet (title, canonical_key) pairs without loading the workbook via openpyxl."""
+    with zipfile.ZipFile(file_path, "r") as zf:
+        return [
+            (name, key)
+            for name, _path in workbook_sheet_paths(zf)
+            if (key := canonical_sheet_name(name))
+        ]
 
 
 def normalize_amount(raw: str) -> str:
@@ -422,8 +446,9 @@ def count_project_columns_from_rep_cout(sheet) -> dict[str, str]:
         parsed = parse_number_to_float(number)
         return parsed is not None and abs(parsed) > 0
 
-    max_row = min(sheet.max_row or 240, 240)
-    max_col = min(sheet.max_column or 220, 220)
+    rep_row_cap, rep_col_cap = (100, 60) if _on_render_free_tier() else (240, 220)
+    max_row = min(sheet.max_row or rep_row_cap, rep_row_cap)
+    max_col = min(sheet.max_column or rep_col_cap, rep_col_cap)
     rows = list(
         sheet.iter_rows(
             min_row=1,
@@ -592,40 +617,42 @@ def read_fixed_parametres_cells_from_ws(ws) -> tuple[str, str, str, str]:
 
 def apply_fixed_parametres_cells(file_path: str, data: dict[str, str]) -> None:
     """
-    Lecture directe sur Paramètres chiffrage (même onglet que pick_parametres_chiffrage_worksheet) :
-    - Hono (année) : C13 (colonne 3, ligne 13)
-    - Honoraires n-1 : G13 (colonne 7, ligne 13)
-    - Nombre de projets CIR : D15 (colonne 4, ligne 15)
-    - Nombre de projets CII : E15 (colonne 5, ligne 15)
-
-    Passe 1 : read_only + data_only (léger, adapté au plan Render 512 Mo).
-    Passe 2 : chargement complet uniquement si des cellules sont encore vides.
+    C13/G13/D15/E15 via ZIP+XML (très léger). Secours openpyxl read_only sur une seule
+    feuille uniquement si des valeurs manquent encore.
     """
-    def read_fixed_cells(data_only: bool, read_only: bool) -> tuple[str, str, str, str]:
-        wb = load_workbook(file_path, data_only=data_only, read_only=read_only)
+    def matcher(name: str) -> bool:
+        return canonical_sheet_name(name) == "parametres_chiffrage"
+
+    cells: dict[tuple[int, int], Any] = {}
+    try:
+        cells = read_parametres_fixed_cells(file_path, matcher)
+    except Exception:
+        cells = {}
+
+    c_amt = normalize_cell_to_amount_string(cells.get((13, 3)))
+    g_amt = normalize_cell_to_amount_string(cells.get((13, 7)))
+    cir_n = normalize_cell_to_amount_string(cells.get((15, 4)))
+    cii_n = normalize_cell_to_amount_string(cells.get((15, 5)))
+
+    if not c_amt or not g_amt or not cir_n or not cii_n:
+        wb = load_workbook(file_path, data_only=True, read_only=True)
         try:
             ws = pick_parametres_chiffrage_worksheet(wb)
-            if ws is None:
-                return "", "", "", ""
-            return read_fixed_parametres_cells_from_ws(ws)
+            if ws is not None:
+                c2, g2, cir2, cii2 = read_fixed_parametres_cells_from_ws(ws)
+                if not c_amt:
+                    c_amt = c2
+                if not g_amt:
+                    g_amt = g2
+                if not cir_n:
+                    cir_n = cir2
+                if not cii_n:
+                    cii_n = cii2
         finally:
             wb.close()
 
-    c_amt, g_amt, cir_n, cii_n = read_fixed_cells(True, True)
-    if not c_amt or not g_amt or not cir_n or not cii_n:
-        c2, g2, cir2, cii2 = read_fixed_cells(False, False)
-        if not c_amt:
-            c_amt = c2
-        if not g_amt:
-            g_amt = g2
-        if not cir_n:
-            cir_n = cir2
-        if not cii_n:
-            cii_n = cii2
-
     data["honoraires"] = c_amt
     data["honoraires_n_1"] = g_amt
-    # D15/E15 : si renseignées (y compris 0), elles priment ; sinon on garde REP cout / heuristiques.
     if cir_n != "":
         data["nombre_projets_cir"] = cir_n
     if cii_n != "":
@@ -733,155 +760,157 @@ def extract_fields_from_workbook(file_path: str) -> dict[str, str]:
         for field in configured_fields
     }
 
-    workbook = load_workbook(file_path, data_only=True, read_only=True)
     data: dict[str, str] = {field["key"]: "" for field in configured_fields}
+    apply_fixed_parametres_cells(file_path, data)
 
-    target_worksheets = [
-        sheet for sheet in workbook.worksheets if canonical_sheet_name(sheet.title)
-    ]
+    scan_rows, scan_cols = effective_scan_limits()
+    sheet_jobs = list_canonical_sheet_names(file_path)
 
-    for sheet in target_worksheets:
-        sheet_key = canonical_sheet_name(sheet.title)
-        if not sheet_key:
-            continue
-        credit_choice = data.get("credit_parametres", "")
-        if sheet_key == "rep_cout":
-            project_counts = count_project_columns_from_rep_cout(sheet)
-            for key, value in project_counts.items():
-                if key in data and value:
-                    data[key] = value
-        if sheet_key == "parametres_chiffrage":
-            # C13/G13 honoraires + D15/E15 nb projets — valeurs définitives via
-            # apply_fixed_parametres_cells() en fin de pipeline.
-            project_counts_from_parametres = extract_project_counts_from_parametres(sheet)
-            for key, value in project_counts_from_parametres.items():
-                if key in data and value != "":
-                    data[key] = value
-        if sheet_key == "synthese":
-            credit_values = extract_credit_amounts_from_synthese(sheet)
-            for key, value in credit_values.items():
-                if key in data and value and not data[key]:
-                    data[key] = value
-            depenses_from_columns = extract_synthese_depenses_by_columns(sheet, credit_choice)
-            for key, value in depenses_from_columns.items():
-                if key in data and value:
-                    current_float = parse_number_to_float(data.get(key))
-                    new_float = parse_number_to_float(value)
-                    if current_float is None or (new_float is not None and abs(new_float) > abs(current_float)):
+    for sheet_name, sheet_key in sheet_jobs:
+        workbook = load_workbook(file_path, data_only=True, read_only=True)
+        try:
+            try:
+                sheet = workbook[sheet_name]
+            except KeyError:
+                continue
+
+            credit_choice = data.get("credit_parametres", "")
+            if sheet_key == "rep_cout":
+                project_counts = count_project_columns_from_rep_cout(sheet)
+                for key, value in project_counts.items():
+                    if key in data and value:
                         data[key] = value
-            if "depenses_prestataires_externes" in data and not data["depenses_prestataires_externes"]:
-                prestataires_total = extract_prestataires_total_from_synthese(sheet, credit_choice)
-                if prestataires_total:
-                    data["depenses_prestataires_externes"] = prestataires_total
-        if sheet_key == "2069_a":
-            totals_2069 = extract_2069_line_totals(sheet)
-            for key, value in totals_2069.items():
-                if key in data and value:
-                    data[key] = value
-        max_row = min(sheet.max_row or MAX_SCAN_ROWS, MAX_SCAN_ROWS)
-        max_col = min(sheet.max_column or MAX_SCAN_COLS, MAX_SCAN_COLS)
-        for row in sheet.iter_rows(
-            min_row=1,
-            max_row=max_row,
-            min_col=1,
-            max_col=max_col,
-            values_only=True,
-        ):
-            for index, value in enumerate(row):
-                if value is None:
-                    continue
-                cell_text = str(value).strip()
-                if not cell_text:
-                    continue
-                normalized_cell_text = normalize_text(value)
-                candidate_values = get_candidate_values(row, index)
-                if not candidate_values and index + 1 < len(row):
-                    candidate_values = [row[index + 1]]
+            if sheet_key == "parametres_chiffrage":
+                project_counts_from_parametres = extract_project_counts_from_parametres(sheet)
+                for key, value in project_counts_from_parametres.items():
+                    if key in data and value != "":
+                        data[key] = value
+            if sheet_key == "synthese":
+                credit_values = extract_credit_amounts_from_synthese(sheet)
+                for key, value in credit_values.items():
+                    if key in data and value and not data[key]:
+                        data[key] = value
+                depenses_from_columns = extract_synthese_depenses_by_columns(sheet, credit_choice)
+                for key, value in depenses_from_columns.items():
+                    if key in data and value:
+                        current_float = parse_number_to_float(data.get(key))
+                        new_float = parse_number_to_float(value)
+                        if current_float is None or (
+                            new_float is not None and abs(new_float) > abs(current_float)
+                        ):
+                            data[key] = value
+                if "depenses_prestataires_externes" in data and not data["depenses_prestataires_externes"]:
+                    prestataires_total = extract_prestataires_total_from_synthese(sheet, credit_choice)
+                    if prestataires_total:
+                        data["depenses_prestataires_externes"] = prestataires_total
+            if sheet_key == "2069_a":
+                totals_2069 = extract_2069_line_totals(sheet)
+                for key, value in totals_2069.items():
+                    if key in data and value:
+                        data[key] = value
+            max_row = min(sheet.max_row or scan_rows, scan_rows)
+            max_col = min(sheet.max_column or scan_cols, scan_cols)
+            for row in sheet.iter_rows(
+                min_row=1,
+                max_row=max_row,
+                min_col=1,
+                max_col=max_col,
+                values_only=True,
+            ):
+                for index, value in enumerate(row):
+                    if value is None:
+                        continue
+                    cell_text = str(value).strip()
+                    if not cell_text:
+                        continue
+                    normalized_cell_text = normalize_text(value)
+                    candidate_values = get_candidate_values(row, index)
+                    if not candidate_values and index + 1 < len(row):
+                        candidate_values = [row[index + 1]]
 
-                for field, patterns in field_patterns.items():
-                    if data[field]:
-                        continue
-                    # Cellules fixes Paramètres chiffrage — pas d'heuristique par motif sur ces champs.
-                    if sheet_key == "parametres_chiffrage" and field in (
-                        "honoraires",
-                        "honoraires_n_1",
-                        "nombre_projets_cir",
-                        "nombre_projets_cii",
-                    ):
-                        continue
-                    source_tabs = field_source_tabs.get(field, set())
-                    if source_tabs and sheet_key not in source_tabs:
-                        continue
-                    for pattern in patterns:
-                        if pattern.search(cell_text) or pattern.search(normalized_cell_text):
-                            value_type = field_types.get(field, "text")
-                            extracted: str | None = None
-                            if value_type == "siren":
-                                for candidate in candidate_values + [cell_text]:
-                                    siren_match = SIREN_REGEX.search(str(candidate))
-                                    if siren_match:
-                                        extracted = siren_match.group(1).replace(" ", "")
-                                        break
-                            elif value_type == "number":
-                                for candidate in candidate_values:
-                                    extracted = extract_number(candidate)
-                                    if extracted:
-                                        break
-                                if not extracted:
-                                    extracted = extract_number(cell_text)
-                            elif value_type == "yes_no":
-                                for candidate in candidate_values + [cell_text]:
-                                    yes_no_match = YES_NO_REGEX.search(str(candidate))
+                    for field, patterns in field_patterns.items():
+                        if data[field]:
+                            continue
+                        if sheet_key == "parametres_chiffrage" and field in (
+                            "honoraires",
+                            "honoraires_n_1",
+                            "nombre_projets_cir",
+                            "nombre_projets_cii",
+                        ):
+                            continue
+                        source_tabs = field_source_tabs.get(field, set())
+                        if source_tabs and sheet_key not in source_tabs:
+                            continue
+                        for pattern in patterns:
+                            if pattern.search(cell_text) or pattern.search(normalized_cell_text):
+                                value_type = field_types.get(field, "text")
+                                extracted: str | None = None
+                                if value_type == "siren":
+                                    for candidate in candidate_values + [cell_text]:
+                                        siren_match = SIREN_REGEX.search(str(candidate))
+                                        if siren_match:
+                                            extracted = siren_match.group(1).replace(" ", "")
+                                            break
+                                elif value_type == "number":
+                                    for candidate in candidate_values:
+                                        extracted = extract_number(candidate)
+                                        if extracted:
+                                            break
+                                    if not extracted:
+                                        extracted = extract_number(cell_text)
+                                elif value_type == "yes_no":
+                                    for candidate in candidate_values + [cell_text]:
+                                        yes_no_match = YES_NO_REGEX.search(str(candidate))
+                                        if yes_no_match:
+                                            extracted = normalize_yes_no(yes_no_match.group(1))
+                                            break
+                                elif value_type == "pole":
+                                    for candidate in candidate_values + [cell_text]:
+                                        pole_match = POLE_REGEX.search(str(candidate))
+                                        if pole_match:
+                                            extracted = normalize_pole(pole_match.group(1))
+                                            break
+                                elif value_type == "credit_choice":
+                                    for candidate in candidate_values + [cell_text]:
+                                        extracted = extract_credit_choice(candidate)
+                                        if extracted:
+                                            break
+                                elif value_type == "year":
+                                    for candidate in candidate_values + [cell_text]:
+                                        extracted = extract_year(candidate)
+                                        if extracted:
+                                            break
+                                elif value_type == "honoraires_type":
+                                    for candidate in candidate_values + [cell_text]:
+                                        candidate_text = str(candidate).strip()
+                                        normalized = normalize_text(candidate_text)
+                                        if (
+                                            "palier" in normalized
+                                            or "fixe" in normalized
+                                            or "%" in candidate_text
+                                            or "pourcentage" in normalized
+                                        ):
+                                            extracted = normalize_honoraires_type(candidate_text)
+                                            break
+                                if not extracted and value_type == "text":
+                                    for candidate in candidate_values:
+                                        extracted = extract_text_candidate(candidate)
+                                        if extracted:
+                                            break
+                                if value_type == "yes_no" and extracted:
+                                    yes_no_match = YES_NO_REGEX.search(extracted)
                                     if yes_no_match:
                                         extracted = normalize_yes_no(yes_no_match.group(1))
-                                        break
-                            elif value_type == "pole":
-                                for candidate in candidate_values + [cell_text]:
-                                    pole_match = POLE_REGEX.search(str(candidate))
-                                    if pole_match:
-                                        extracted = normalize_pole(pole_match.group(1))
-                                        break
-                            elif value_type == "credit_choice":
-                                for candidate in candidate_values + [cell_text]:
-                                    extracted = extract_credit_choice(candidate)
-                                    if extracted:
-                                        break
-                            elif value_type == "year":
-                                for candidate in candidate_values + [cell_text]:
-                                    extracted = extract_year(candidate)
-                                    if extracted:
-                                        break
-                            elif value_type == "honoraires_type":
-                                for candidate in candidate_values + [cell_text]:
-                                    candidate_text = str(candidate).strip()
-                                    normalized = normalize_text(candidate_text)
-                                    if (
-                                        "palier" in normalized
-                                        or "fixe" in normalized
-                                        or "%" in candidate_text
-                                        or "pourcentage" in normalized
-                                    ):
-                                        extracted = normalize_honoraires_type(candidate_text)
-                                        break
-                            if not extracted and value_type == "text":
-                                for candidate in candidate_values:
-                                    extracted = extract_text_candidate(candidate)
-                                    if extracted:
-                                        break
-                            if value_type == "yes_no" and extracted:
-                                yes_no_match = YES_NO_REGEX.search(extracted)
-                                if yes_no_match:
-                                    extracted = normalize_yes_no(yes_no_match.group(1))
-                            if value_type == "pole" and extracted:
-                                extracted = normalize_pole(extracted)
-                            if extracted:
-                                data[field] = extracted
-                            break
-            if all(data.values()):
-                break
+                                if value_type == "pole" and extracted:
+                                    extracted = normalize_pole(extracted)
+                                if extracted:
+                                    data[field] = extracted
+                                break
+                if all(data.values()):
+                    break
+        finally:
+            workbook.close()
         if all(data.values()):
             break
 
-    workbook.close()
-    apply_fixed_parametres_cells(file_path, data)
     return data

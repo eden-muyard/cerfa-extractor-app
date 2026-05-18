@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta
 from base64 import b64decode
+import gc
 import os
 import secrets
 
@@ -120,6 +121,8 @@ async def upload_file(request: Request, file: UploadFile = File(...)) -> HTMLRes
     unique_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}_{original_name}"
     target_path = UPLOAD_DIR / unique_name
     target_path.write_bytes(payload)
+    del payload
+    gc.collect()
 
     extracted = extract_fields_from_workbook(str(target_path))
     save_status = append_extraction(original_name, extracted)
