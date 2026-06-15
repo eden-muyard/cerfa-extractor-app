@@ -3,94 +3,408 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CERFA 2069-A-SD Extractor</title>
+  <title>Database Extractor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; }
-    .container { max-width: 760px; background: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 20px rgba(0, 0, 0, .08); }
-    h1 { margin-top: 0; }
-    .hint { color: #555; margin-top: 0; }
-    form { margin: 1rem 0 1.5rem; display: flex; gap: .8rem; align-items: center; }
-    input[type=file] { flex: 1; }
-    button { border: 0; padding: .6rem 1rem; background: #2457ff; color: white; border-radius: 6px; cursor: pointer; }
-    .error { background: #ffe5e5; color: #842029; padding: .8rem; border-radius: 6px; }
-    .message { background: #e5ffec; color: #0f5132; padding: .8rem; border-radius: 6px; margin-bottom: .8rem; }
-    .warning { background: #fff6df; color: #7c5a00; padding: .8rem; border-radius: 6px; margin-bottom: .8rem; }
-    .result { background: #e8f4ff; padding: 1rem; border-radius: 6px; }
-    .config { background: #fff7e8; padding: 1rem; border-radius: 6px; margin-bottom: 1.2rem; }
-    .result-grid { display: grid; grid-template-columns: 180px 1fr; row-gap: .5rem; column-gap: .8rem; }
-    .config-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: .6rem; align-items: end; margin-top: .7rem; }
-    .config-grid input, .config-grid select { padding: .45rem; border: 1px solid #ccc; border-radius: 6px; }
-    .label { font-weight: bold; }
-    .pill { display: inline-block; background: #eef2ff; color: #243c9b; border-radius: 999px; padding: .2rem .6rem; margin: .2rem .2rem 0 0; font-size: .85rem; }
-    .pill.required { background: #d9ecff; color: #0b4a99; }
-    code { background: #f0f0f0; padding: .1rem .3rem; border-radius: 4px; }
+    :root {
+      --bg: #0f1419;
+      --surface: #1a222d;
+      --surface-2: #232d3b;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #3dd6c3;
+      --accent-dim: rgba(61, 214, 195, 0.12);
+      --accent-hover: #2ec4b2;
+      --danger-bg: rgba(239, 68, 68, 0.12);
+      --danger-text: #fca5a5;
+      --success-bg: rgba(52, 211, 153, 0.12);
+      --success-text: #6ee7b7;
+      --warn-bg: rgba(251, 191, 36, 0.12);
+      --warn-text: #fcd34d;
+      --radius: 14px;
+      --shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "DM Sans", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(ellipse 80% 60% at 50% -20%, rgba(61, 214, 195, 0.18), transparent),
+        radial-gradient(ellipse 50% 40% at 100% 100%, rgba(99, 102, 241, 0.12), transparent),
+        var(--bg);
+      line-height: 1.5;
+    }
+
+    .page {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+
+    .header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .logo {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), #6366f1);
+      display: grid;
+      place-items: center;
+      font-size: 1.5rem;
+      box-shadow: 0 8px 24px rgba(61, 214, 195, 0.25);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      margin: 0.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .export-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .export-link:hover {
+      border-color: rgba(61, 214, 195, 0.4);
+      background: var(--surface-2);
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+      box-shadow: var(--shadow);
+    }
+
+    .card-title {
+      margin: 0 0 0.35rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+
+    .hint {
+      color: var(--muted);
+      margin: 0 0 1rem;
+      font-size: 0.9rem;
+    }
+
+    .alert {
+      padding: 0.85rem 1rem;
+      border-radius: 10px;
+      margin-bottom: 1rem;
+      font-size: 0.92rem;
+      border: 1px solid transparent;
+    }
+
+    .alert-error { background: var(--danger-bg); color: var(--danger-text); border-color: rgba(239, 68, 68, 0.2); }
+    .alert-success { background: var(--success-bg); color: var(--success-text); border-color: rgba(52, 211, 153, 0.2); }
+    .alert-warning { background: var(--warn-bg); color: var(--warn-text); border-color: rgba(251, 191, 36, 0.2); }
+
+    .upload-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      padding: 2rem 1.5rem;
+      border: 2px dashed rgba(61, 214, 195, 0.35);
+      border-radius: 12px;
+      background: var(--accent-dim);
+      text-align: center;
+    }
+
+    .upload-zone input[type=file] {
+      width: 100%;
+      max-width: 420px;
+      padding: 0.6rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .upload-zone input[type=file]::file-selector-button {
+      margin-right: 0.75rem;
+      padding: 0.45rem 0.9rem;
+      border: 0;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #0f1419;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .btn {
+      border: 0;
+      padding: 0.7rem 1.4rem;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s, background 0.15s, box-shadow 0.15s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #2eb8a8);
+      color: #0f1419;
+      box-shadow: 0 4px 16px rgba(61, 214, 195, 0.3);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, var(--accent-hover), #28a89a);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr auto;
+      gap: 0.75rem;
+      align-items: end;
+    }
+
+    @media (max-width: 720px) {
+      .config-grid { grid-template-columns: 1fr; }
+    }
+
+    .field-label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .config-grid input,
+    .config-grid select {
+      width: 100%;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.92rem;
+    }
+
+    .config-grid input:focus,
+    .config-grid select:focus {
+      outline: none;
+      border-color: rgba(61, 214, 195, 0.5);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 1rem;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      background: var(--surface-2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .pill.required {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-color: rgba(61, 214, 195, 0.25);
+    }
+
+    code {
+      background: var(--surface-2);
+      padding: 0.15rem 0.4rem;
+      border-radius: 5px;
+      font-size: 0.85em;
+      color: var(--accent);
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: minmax(160px, 220px) 1fr;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 1rem;
+    }
+
+    .result-row {
+      display: contents;
+    }
+
+    .result-row:nth-child(even) .result-label,
+    .result-row:nth-child(even) .result-value {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .result-label {
+      padding: 0.55rem 0.85rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .result-value {
+      padding: 0.55rem 0.85rem;
+      font-size: 0.92rem;
+      border-bottom: 1px solid var(--border);
+      word-break: break-word;
+    }
+
+    .result-row:last-child .result-label,
+    .result-row:last-child .result-value {
+      border-bottom: none;
+    }
+
+    .empty-value { color: var(--muted); font-style: italic; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>CERFA 2069-A-SD Extractor</h1>
-    <p class="hint">Upload a CERFA Excel file. The app extracts key values and saves each row in the shared database.</p>
-    <p class="hint"><a href="/export/extractions.xlsx">Download latest extractions as Excel</a></p>
+  <div class="page">
+    <header class="header">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">⬡</div>
+        <div>
+          <h1>Database Extractor</h1>
+          <p class="subtitle">Upload an Excel matrix and extract structured data into your database.</p>
+        </div>
+      </div>
+      <a class="export-link" href="/export/extractions.xlsx">↓ Export Excel</a>
+    </header>
 
     {% if error %}
-      <div class="error">{{ error }}</div>
+      <div class="alert alert-error">{{ error }}</div>
     {% endif %}
     {% if message %}
-      <div class="message">{{ message }}</div>
+      <div class="alert alert-success">{{ message }}</div>
     {% endif %}
     {% if missing_required_labels %}
-      <div class="warning">
+      <div class="alert alert-warning">
         <strong>Missing required values:</strong> {{ missing_required_labels | join(", ") }}
       </div>
     {% endif %}
 
-    <div class="config">
-      <h3 style="margin:0;">Add a new label</h3>
-      <p class="hint">Just fill the name and click the button. Example: <code>Honoraires 2026</code>. The required labels are locked and always kept.</p>
+    <section class="card">
+      <h2 class="card-title">Upload file</h2>
+      <p class="hint">Supported formats: .xlsx, .xlsm, .xltx, .xltm</p>
+      <form method="post" action="/upload" enctype="multipart/form-data">
+        <div class="upload-zone">
+          <input type="file" name="file" accept=".xlsx,.xlsm,.xltx,.xltm" required>
+          <button type="submit" class="btn btn-primary">Extract data</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Configure labels</h2>
+      <p class="hint">Add custom fields to extract. Example: <code>Honoraires 2026</code>. Required labels are always kept.</p>
       <form method="post" action="/labels/add" class="config-grid">
         <div>
-          <div class="label">Label name</div>
-          <input type="text" name="label" placeholder="Ex: Pole client" required>
+          <label class="field-label" for="label-name">Label name</label>
+          <input id="label-name" type="text" name="label" placeholder="e.g. Pole client" required>
         </div>
         <div>
-          <div class="label">Keywords (optional)</div>
-          <input type="text" name="patterns" placeholder="Ex: pole, p[ôo]le">
+          <label class="field-label" for="label-patterns">Keywords (optional)</label>
+          <input id="label-patterns" type="text" name="patterns" placeholder="e.g. pole, pôle">
         </div>
         <div>
-          <div class="label">Value type</div>
-          <select name="value_type">
+          <label class="field-label" for="label-type">Value type</label>
+          <select id="label-type" name="value_type">
             <option value="text">Text</option>
             <option value="number">Number</option>
             <option value="siren">SIREN</option>
-            <option value="yes_no">Yes/No</option>
-            <option value="pole">Pole (energie/biotech/industrie/innovation/digitale)</option>
+            <option value="yes_no">Yes / No</option>
+            <option value="pole">Pole</option>
           </select>
         </div>
         <div>
-          <button type="submit">+ Add label</button>
+          <button type="submit" class="btn btn-secondary">+ Add label</button>
         </div>
       </form>
-      <div style="margin-top:.6rem;">
+      <div class="pills">
         {% for field in fields %}
           <span class="pill {% if field.key in required_keys %}required{% endif %}">{{ field.label }}</span>
         {% endfor %}
       </div>
-    </div>
-
-    <form method="post" action="/upload" enctype="multipart/form-data">
-      <input type="file" name="file" accept=".xlsx,.xlsm,.xltx,.xltm" required>
-      <button type="submit">Extract</button>
-    </form>
+    </section>
 
     {% if result %}
-      <div class="result">
-        <h3>Last extraction</h3>
+      <section class="card">
+        <h2 class="card-title">Last extraction</h2>
         <div class="result-grid">
           {% for field in fields %}
-            <div class="label">{{ field.label }}</div><div>{{ result[field.key] or "-" }}</div>
+            <div class="result-row">
+              <div class="result-label">{{ field.label }}</div>
+              <div class="result-value">
+                {% if result[field.key] %}
+                  {{ result[field.key] }}
+                {% else %}
+                  <span class="empty-value">—</span>
+                {% endif %}
+              </div>
+            </div>
           {% endfor %}
         </div>
-      </div>
+      </section>
     {% endif %}
   </div>
 </body>

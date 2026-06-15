@@ -30,7 +30,7 @@ APP_USERNAME = os.getenv("APP_USERNAME", "").strip()
 APP_PASSWORD = os.getenv("APP_PASSWORD", "").strip()
 AUTH_ENABLED = bool(APP_USERNAME and APP_PASSWORD)
 
-app = FastAPI(title="CERFA 2069-A-SD Extractor")
+app = FastAPI(title="Database Extractor")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
